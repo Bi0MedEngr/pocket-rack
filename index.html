@@ -169,7 +169,15 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
 @keyframes pulse{0%,100%{box-shadow:0 0 0 2px #fff,0 0 12px #fff}50%{box-shadow:0 0 0 4px #59cd90,0 0 18px #59cd90}}
 
 .deck label.sbtn{display:inline-flex;align-items:center;cursor:pointer;background:var(--deck);color:#2a1f00}
-#wave{display:block;width:100%;height:96px;border-radius:6px;border:1px solid #000;background:#151208;touch-action:none;margin-bottom:10px}
+#wave{display:block;width:100%;height:96px;border-radius:6px;border:1px solid #000;background:#151208;touch-action:none;margin-bottom:4px}
+.dkinfo{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim);margin:0 2px 10px;min-height:13px}
+.dkinfo b{font-weight:700;padding:1px 5px;border-radius:3px;margin-right:6px;color:#111}
+.q-low{background:#ff6b5b}.q-ok{background:#f2b134}.q-good{background:#59cd90}.q-hi{background:#4fd1c5}
+.stems{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.stem{display:flex;flex-direction:column;align-items:center;background:#1d2026;border:1px solid #000;border-radius:5px;padding:6px 0 8px}
+.stem .sbtn{height:24px;font-size:9.5px;margin-top:4px;padding:0 8px}
+.stem.off{opacity:.45}
+.sec h4 span{color:var(--deck);letter-spacing:.1em;margin-left:6px}
 .dkt{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
 .dkt .big{width:56px;height:40px;font-size:17px}
 .foot{font-size:10px;color:var(--faint);text-align:center;margin-top:14px;line-height:1.5}
@@ -264,6 +272,7 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
     <div class="btns"><label class="sbtn" for="deckFile">LOAD TRACK</label><input type="file" id="deckFile" accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac" hidden></div>
   </div>
   <canvas id="wave"></canvas>
+  <div class="dkinfo" id="dkInfo"></div>
   <div class="dkt">
     <button class="sbtn big" id="dkPlay">▶</button>
     <button class="sbtn big" id="dkCue">⏮</button>
@@ -271,6 +280,10 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
     <button class="sbtn" id="dkSync" style="height:40px">SYNC ▶</button>
   </div>
   <div class="sec"><h4>TONE</h4><div class="row" id="dkk"></div></div>
+  <div class="sec"><h4>STEMS<span id="stInfo"></span></h4>
+    <div class="btns" style="flex-wrap:wrap;margin-bottom:8px"><button class="sbtn" id="stOn">STEMS OFF</button><button class="sbtn" id="stAca">ACAPELLA</button><button class="sbtn" id="stIns">INSTRUMENTAL</button><button class="sbtn" id="stAll">ALL</button></div>
+    <div class="stems" id="stems"></div>
+  </div>
   <div class="sec"><h4>TEMPO</h4><div class="row" id="dkb"></div>
     <div class="btns" style="margin-top:6px"><button class="sbtn" id="dkTap">TAP</button><button class="sbtn" id="dkMatch">MATCH RACK BPM</button></div>
   </div>
@@ -372,7 +385,7 @@ function demo(){
     mix:{ch:[{level:.85,pan:0,send:.04,mute:false},{level:.75,pan:0,send:.22,mute:false},{level:.6,pan:.15,send:.3,mute:false},{level:.7,pan:0,send:0,mute:false}],
       dTime:2,dFb:.38,dTone:3200,dRet:.8,drive:.15,master:.8},
     cables:DEFAULT_CABLES.map(c=>c.slice()),
-    deck:{vol:.8,speed:1,low:0,mid:0,high:0,bpm:120,loop:true,sync:false},
+    deck:{vol:.8,speed:1,low:0,mid:0,high:0,bpm:120,loop:true,sync:false,stems:{on:false,v:1,d:1,b:1,o:1,mute:{v:false,d:false,b:false,o:false}}},
     trims:{'mx.cv2':-.5}
   };
 }
@@ -383,7 +396,7 @@ try{
   if(saved&&saved.drums&&saved.synth&&saved.seq&&saved.mix&&saved.pad&&saved.cables){
     const d=demo();
     state={...d,...saved,synth:{...d.synth,...saved.synth},pad:{...d.pad,...saved.pad},mix:{...d.mix,...saved.mix},trims:{...saved.trims}};
-    state.deck={...d.deck,...(saved.deck||{})};
+    state.deck={...d.deck,...(saved.deck||{})};state.deck.stems={...d.deck.stems,...((saved.deck||{}).stems||{})};state.deck.stems.mute={...d.deck.stems.mute,...(state.deck.stems.mute||{})};
     state.cables=state.cables.filter(c=>J[c[0]]&&J[c[1]]);
     if(!saved.deck&&!state.cables.some(c=>c[1]==='mx.in4'))state.cables.push(['pl.out','mx.in4']);
   }
@@ -469,7 +482,7 @@ function initAudio(){
   /* PL-1 track deck */
   const D=A.pl={};D.low=ctx.createBiquadFilter();D.low.type='lowshelf';D.low.frequency.value=250;
   D.mid=filt('peaking',1000,.9);D.high=ctx.createBiquadFilter();D.high.type='highshelf';D.high.frequency.value=4000;
-  D.vol=G();D.out=G();D.rIn=G(0);D.low.connect(D.mid).connect(D.high).connect(D.vol).connect(D.out);
+  D.vol=G();D.out=G();D.rIn=G(0);D.in=G();D.in.connect(D.low);D.stemOn=false;D.low.connect(D.mid).connect(D.high).connect(D.vol).connect(D.out);
 
   starts.forEach(n=>n.start(t));
 
@@ -482,7 +495,7 @@ function initAudio(){
   state.cables.forEach(audioConnect);
 
   A.lfoDest=null; A.curMidi=45; setNoteFreq(t,45,0);
-  applySynth(); applyMix(); applyPad(); applyDeck();
+  applySynth(); applyMix(); applyPad(); applyDeck(); initStems();
 }
 function audioConnect(c){if(!ctx)return;try{A.J[c[0]].connect(A.J[c[1]]);}catch(e){}}
 function audioDisconnect(c){if(!ctx)return;try{A.J[c[0]].disconnect(A.J[c[1]]);}catch(e){}}
@@ -843,11 +856,13 @@ function deckPos(){if(!deck.buf)return 0;if(!deck.playing||!ctx)return deck.offs
 function deckStopSrc(){if(!deck.src)return;const s=deck.src;deck.src=null;s.onended=null;try{s.stop();}catch(e){}try{A.pl.rIn.disconnect(s.playbackRate);}catch(e){}}
 function deckPlay(t){if(!deck.buf)return;initAudio();t=t||ctx.currentTime+.01;deckStopSrc();
   const s=ctx.createBufferSource();s.buffer=deck.buf;s.loop=DK().loop;s.playbackRate.value=DK().speed;
-  A.pl.rIn.connect(s.playbackRate);s.connect(A.pl.low);
+  A.pl.rIn.connect(s.playbackRate);s.connect(A.pl.in);
   let off=deck.offset%deck.buf.duration;if(off>deck.buf.duration-.05)off=0;
+  off=(off+stemLat()*DK().speed)%deck.buf.duration;
   s.start(t,off);deck.offset=off;deck.startedAt=t;deck.rate=DK().speed;deck.src=s;deck.playing=true;
   s.onended=()=>{if(deck.src===s){deckStopSrc();deck.playing=false;deck.offset=0;refreshDeck();}};refreshDeck();}
-function deckPause(){deck.offset=deckPos();deckStopSrc();deck.playing=false;refreshDeck();}
+function heardPos(){if(!deck.buf)return 0;if(!deck.playing)return deck.offset;const d=deck.buf.duration;let p=deckPos()-stemLat()*deck.rate;if(p<0)p=DK().loop?p+d:0;return p;}
+function deckPause(){deck.offset=heardPos();deckStopSrc();deck.playing=false;refreshDeck();}
 function deckSeek(p){if(!deck.buf)return;const was=deck.playing;if(was){deckStopSrc();deck.playing=false;}deck.offset=clamp(p,0,deck.buf.duration-.01);if(was)deckPlay();refreshDeck();}
 function peaksOf(buf,n=500){const c0=buf.getChannelData(0),c1=buf.numberOfChannels>1?buf.getChannelData(1):c0,step=Math.floor(c0.length/n),out=new Float32Array(n);
   for(let i=0;i<n;i++){let m=0;for(let j=i*step,e=j+step;j<e;j+=4){const v=Math.abs(c0[j]+c1[j])*.5;if(v>m)m=v;}out[i]=m;}
@@ -866,7 +881,7 @@ $('#deckFile').addEventListener('change',async e=>{const f=e.target.files&&e.tar
   try{const ab=await f.arrayBuffer();
     const buf=await new Promise((res,rej)=>{const p=ctx.decodeAudioData(ab,res,rej);if(p&&p.then)p.then(res,rej);});
     if(deck.playing)deckPause();deckStopSrc();deck.buf=buf;deck.offset=0;deck.playing=false;deck.name=f.name.replace(/\.[^.]+$/,'');
-    deck.peaks=peaksOf(buf);deck.status='';await new Promise(r=>setTimeout(r,20));
+    deck.peaks=peaksOf(buf);deck.status='';deck.info=fileInfo(f,buf);await new Promise(r=>setTimeout(r,20));
     const b=detectBpm(buf);if(b){DK().bpm=b;save();}knobs.forEach(k=>k.upd());refreshDeck();
   }catch(err){deck.status="Couldn't decode that file. Try MP3, M4A/AAC or WAV (DRM-protected files won't open).";refreshDeck();}
   e.target.value='';});
@@ -888,9 +903,48 @@ kD($('#dkk'),'HIGH','high',{min:-24,max:6,def:0,fmt:db});
 kD($('#dkb'),'SPEED','speed',{min:.5,max:1.5,def:1,fmt:v=>'×'+v.toFixed(3)});
 kD($('#dkb'),'TRACK BPM','bpm',{min:60,max:200,step:.5,fmt:v=>v.toFixed(1)});
 Knob($('#dkb'),{label:'= BPM',min:30,max:300,get:()=>DK().bpm*DK().speed,set:()=>{},fmt:v=>v.toFixed(1)});
-function refreshDeck(){$('#dkPlay').textContent=deck.playing?'❚❚':'▶';$('#dkPlay').classList.toggle('on',deck.playing);
+const STEM_ENGINE="class StemEngine{\n  constructor(sr,KK){\n    const N=2048,H=512,K=KK||8,B=N/2+1,R=2*K+1;\n    this.N=N;this.H=H;this.K=K;this.B=B;this.R=R;this.sr=sr;\n    this.w=new Float32Array(N);for(let i=0;i<N;i++)this.w[i]=0.5-0.5*Math.cos(2*Math.PI*i/N);\n    this.iL=new Float32Array(N);this.iR=new Float32Array(N);this.ip=0;this.cnt=0;\n    this.zr=new Float32Array(N);this.zi=new Float32Array(N);\n    this.ring=[];for(let s=0;s<R;s++)this.ring.push({lr:new Float32Array(B),li:new Float32Array(B),rr:new Float32Array(B),ri:new Float32Array(B),m:new Float32Array(B),c:new Float32Array(B),ms:new Float32Array(B)});\n    this.f=0;\n    this.oL=new Float32Array(N);this.oR=new Float32Array(N);\n    this.qL=new Float32Array(8192);this.qR=new Float32Array(8192);this.qw=0;this.qr=0;\n    this.g={v:1,d:1,b:1,o:1};this.t={v:1,d:1,b:1,o:1};\n    this.bw=new Float32Array(B);this.vw=new Float32Array(B);\n    for(let k=0;k<B;k++){const f=k*sr/N;\n      this.bw[k]=f<=120?1:f>=250?0:(250-f)/130;\n      this.vw[k]=f<150?0:f<250?(f-150)/100:f<5000?1:f<8000?(8000-f)/3000:0;}\n    let bits=0;while((1<<bits)<N)bits++;\n    this.rev=new Uint32Array(N);for(let i=0;i<N;i++){let r=0;for(let b=0;b<bits;b++)r|=((i>>b)&1)<<(bits-1-b);this.rev[i]=r;}\n    this.cs=new Float32Array(N/2);this.sn=new Float32Array(N/2);\n    for(let i=0;i<N/2;i++){this.cs[i]=Math.cos(2*Math.PI*i/N);this.sn[i]=Math.sin(2*Math.PI*i/N);}\n    this.col=new Float32Array(Math.max(R,2*K+1));this.tmp=new Float32Array(Math.max(R,2*K+1));this.Hm=new Float32Array(B);\n  }\n  set(d){for(const k in d)if(k in this.t)this.t[k]=d[k];}\n  fft(re,im,inv){const N=this.N,rev=this.rev;\n    for(let i=0;i<N;i++){const j=rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t;}}\n    for(let size=2;size<=N;size<<=1){const half=size>>1,step=N/size;\n      for(let i=0;i<N;i+=size){for(let j=0,k=0;j<half;j++,k+=step){\n        const c=this.cs[k],s=inv?this.sn[k]:-this.sn[k],a=i+j,b=a+half;\n        const tr=re[b]*c-im[b]*s,ti=re[b]*s+im[b]*c;\n        re[b]=re[a]-tr;im[b]=im[a]-ti;re[a]+=tr;im[a]+=ti;}}}\n    if(inv){const s=1/N;for(let i=0;i<N;i++){re[i]*=s;im[i]*=s;}}}\n  med(a,n,q){const t=this.tmp;for(let i=0;i<n;i++){const v=a[i];let j=i-1;while(j>=0&&t[j]>v){t[j+1]=t[j];j--;}t[j+1]=v;}return t[q===undefined?n>>1:Math.floor(n*q)];}\n  process(L,R,oL,oR){const n=oL.length,N=this.N;\n    for(let i=0;i<n;i++){this.iL[this.ip]=L[i];this.iR[this.ip]=R[i];this.ip=(this.ip+1)&(N-1);if(++this.cnt===this.H){this.cnt=0;this.frame();}}\n    for(let i=0;i<n;i++){if(this.qr!==this.qw){oL[i]=this.qL[this.qr];oR[i]=this.qR[this.qr];this.qr=(this.qr+1)&8191;}else{oL[i]=0;oR[i]=0;}}}\n  frame(){const N=this.N,B=this.B,w=this.w,zr=this.zr,zi=this.zi,p=this.ip;\n    for(let i=0;i<N;i++){const j=(p+i)&(N-1);zr[i]=this.iL[j]*w[i];zi[i]=this.iR[j]*w[i];}\n    this.fft(zr,zi,false);\n    const s=this.ring[this.f%this.R];\n    for(let k=0;k<B;k++){const nk=(N-k)&(N-1);\n      const lr=(zr[k]+zr[nk])*0.5,li=(zi[k]-zi[nk])*0.5,rr=(zi[k]+zi[nk])*0.5,ri=(zr[nk]-zr[k])*0.5;\n      s.lr[k]=lr;s.li[k]=li;s.rr[k]=rr;s.ri[k]=ri;\n      s.m[k]=Math.hypot(lr,li)+Math.hypot(rr,ri);\n      const mid=Math.hypot(lr+rr,li+ri),side=Math.hypot(lr-rr,li-ri);\n      let c=1-side/(mid+1e-9);c=c<0?0:c;s.c[k]=c*c*c;}\n    for(let k=0;k<B;k++){let mx=0;for(let j=k-3;j<=k+3;j++){const v=s.m[j<0?0:j>=B?B-1:j];if(v>mx)mx=v;}s.ms[k]=mx;}\n    this.f++;\n    if(this.f>=this.R)this.synth(this.ring[(this.f-1-this.K)%this.R]);}\n  synth(s){const N=this.N,B=this.B,K=this.K,R=this.R,zr=this.zr,zi=this.zi,g=this.g,t=this.t;\n    for(const k in g)g[k]+=(t[k]-g[k])*0.35;\n    const unity=Math.abs(g.v-1)<1e-3&&Math.abs(g.d-1)<1e-3&&Math.abs(g.b-1)<1e-3&&Math.abs(g.o-1)<1e-3;\n    if(!unity){const col=this.col,Hm=this.Hm;\n      for(let k=0;k<B;k++){for(let j=0;j<R;j++)col[j]=this.ring[j].ms[k];Hm[k]=this.med(col,R,this.bw[k]>0?0.3:0.5);}}\n    for(let k=0;k<B;k++){let G=1;\n      if(!unity){let n=0;const col=this.col;for(let j=k-K;j<=k+K;j++){col[n++]=s.m[j<0?0:j>=B?B-1:j];}\n        const P=this.med(col,n),Hh=this.Hm[k],h2=Hh*Hh,b=this.bw[k],cv=s.c[k]*this.vw[k];let h=h2/(h2+P*P+1e-12);\n        if(b>0){const r=Hh/(s.m[k]+1e-9),ex=r>1?1:r*r;h*=1-b+b*ex;}\n        G=g.d*(1-h)+h*(g.b*b+(1-b)*(g.v*cv+g.o*(1-cv)));}\n      const lr=s.lr[k]*G,li=s.li[k]*G,rr=s.rr[k]*G,ri=s.ri[k]*G;\n      zr[k]=lr-ri;zi[k]=li+rr;\n      if(k>0&&k<B-1){const n2=N-k;zr[n2]=lr+ri;zi[n2]=rr-li;}}\n    this.fft(zr,zi,true);\n    const w=this.w,sc=1/1.5,oL=this.oL,oR=this.oR,H=this.H;\n    for(let i=0;i<N;i++){oL[i]+=zr[i]*w[i]*sc;oR[i]+=zi[i]*w[i]*sc;}\n    for(let i=0;i<H;i++){this.qL[this.qw]=oL[i];this.qR[this.qw]=oR[i];this.qw=(this.qw+1)&8191;}\n    oL.copyWithin(0,H);oL.fill(0,N-H);oR.copyWithin(0,H);oR.fill(0,N-H);}\n}\n";
+const STEM_WRAP="\nclass StemProc extends AudioWorkletProcessor{constructor(){super();this.e=new StemEngine(sampleRate,8);this.z=new Float32Array(128);this.r=new Float32Array(128);this.port.onmessage=m=>this.e.set(m.data);}\nprocess(ins,outs){const i=ins[0],o=outs[0],oL=o[0];if(!oL)return true;if(this.z.length!==oL.length){this.z=new Float32Array(oL.length);this.r=new Float32Array(oL.length);}\nconst L=i&&i[0]?i[0]:this.z,R=i&&i[1]?i[1]:L,oR=o[1]||this.r;this.e.process(L,R,oL,oR);return true;}}\nregisterProcessor('pr-stems',StemProc);\n";
+function stemLat(){return ctx&&A.pl&&A.pl.stemOn?A.pl.stemLat:0;}
+function initStems(){const D=A.pl;D.stemReady=false;
+  const done=(node,set,lat,mode)=>{D.stem=node;D.stemSet=set;D.stemLat=lat;D.stemMode=mode;D.stemReady=true;applyStems();refreshDeck();};
+  const fallback=()=>{try{const Eng=new Function(STEM_ENGINE+';return StemEngine;')(),e=new Eng(ctx.sampleRate,8),sp=ctx.createScriptProcessor(1024,2,2);
+      sp.onaudioprocess=ev=>{const ib=ev.inputBuffer,ob=ev.outputBuffer,L=ib.getChannelData(0),R=ib.numberOfChannels>1?ib.getChannelData(1):L;e.process(L,R,ob.getChannelData(0),ob.getChannelData(1));};
+      done(sp,d=>e.set(d),(2048+8*512+2048)/ctx.sampleRate,'compat');}catch(err){D.stemErr=true;refreshDeck();}};
+  try{if(!ctx.audioWorklet||!window.AudioWorkletNode)return fallback();
+    const url=URL.createObjectURL(new Blob([STEM_ENGINE+'\n'+STEM_WRAP],{type:'application/javascript'}));
+    ctx.audioWorklet.addModule(url).then(()=>{const n=new AudioWorkletNode(ctx,'pr-stems',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2],channelCount:2,channelCountMode:'explicit'});
+      done(n,d=>n.port.postMessage(d),(2048+8*512)/ctx.sampleRate,'worklet');}).catch(fallback);
+  }catch(e){fallback();}}
+function applyStems(){if(!ctx||!A.pl)return;const D=A.pl,st=DK().stems,on=!!(st.on&&D.stemReady);
+  if(on!==D.stemOn){const was=deck.playing,hp=heardPos();if(was){deckStopSrc();deck.playing=false;}
+    try{D.in.disconnect();}catch(e){}try{D.stem&&D.stem.disconnect();}catch(e){}
+    if(on){D.in.connect(D.stem);D.stem.connect(D.low);}else D.in.connect(D.low);
+    D.stemOn=on;deck.offset=hp;if(was)deckPlay();}
+  if(D.stemSet){const g=k=>st.mute[k]?0:st[k];D.stemSet({v:g('v'),d:g('d'),b:g('b'),o:g('o')});}}
+const STEMS=[{k:'v',t:'VOCALS'},{k:'d',t:'DRUMS'},{k:'b',t:'BASS'},{k:'o',t:'MELODY'}];
+const stemEls={};
+STEMS.forEach(({k,t})=>{const c=document.createElement('div');c.className='stem';$('#stems').appendChild(c);
+  Knob(c,{label:t,min:0,max:1.5,def:1,get:()=>DK().stems[k],set:v=>{DK().stems[k]=v;applyStems();},fmt:pct});
+  const m=document.createElement('button');m.className='sbtn';m.textContent='MUTE';
+  m.onclick=()=>{const st=DK().stems;st.mute[k]=!st.mute[k];if(!st.on)st.on=true;applyStems();refreshDeck();save();};c.appendChild(m);stemEls[k]={c,m};});
+const stemPreset=mu=>{const st=DK().stems;st.on=true;Object.assign(st.mute,mu);applyStems();refreshDeck();save();};
+$('#stOn').onclick=()=>{DK().stems.on=!DK().stems.on;applyStems();refreshDeck();save();};
+$('#stAca').onclick=()=>stemPreset({v:false,d:true,b:true,o:true});
+$('#stIns').onclick=()=>stemPreset({v:true,d:false,b:false,o:false});
+$('#stAll').onclick=()=>{const st=DK().stems;STEMS.forEach(({k})=>{st[k]=1;st.mute[k]=false;});knobs.forEach(x=>x.upd());applyStems();refreshDeck();save();};
+function fileInfo(f,buf){const ext=(f.name.split('.').pop()||'').toUpperCase(),kbps=Math.round(f.size*8/buf.duration/1000);
+  const lossless=/^(WAV|AIFF|AIF|FLAC|ALAC)$/.test(ext)||(ext==='M4A'&&kbps>600);
+  const q=lossless?['q-hi','LOSSLESS']:kbps<96?['q-low','LOW']:kbps<160?['q-ok','OK']:kbps<256?['q-good','GOOD']:['q-hi','HIGH'];
+  return {html:`<b class="${q[0]}">${q[1]}</b>≈${kbps} kbps · ${ext||'AUDIO'} · ${buf.numberOfChannels>1?'STEREO':'MONO'} · ${tfmt(buf.duration)}`,mono:buf.numberOfChannels<2,low:!lossless&&kbps<96};}
+function refreshDeck(){const st=DK().stems,D=ctx&&A.pl;
+  $('#dkInfo').innerHTML=deck.info?deck.info.html:'';
+  $('#stOn').textContent=st.on?'STEMS ON':'STEMS OFF';$('#stOn').classList.toggle('on',st.on);
+  STEMS.forEach(({k})=>{stemEls[k].m.classList.toggle('on',st.mute[k]);stemEls[k].c.classList.toggle('off',!st.on||st.mute[k]);});
+  $('#stInfo').textContent=D&&D.stemErr?'· UNAVAILABLE IN THIS BROWSER':st.on?(D&&D.stemReady?`· LIVE · ${Math.round(D.stemLat*1000)}ms`:'· STARTING…'):'';
+  $('#dkPlay').textContent=deck.playing?'❚❚':'▶';$('#dkPlay').classList.toggle('on',deck.playing);
   $('#dkLoop').classList.toggle('on',DK().loop);$('#dkSync').classList.toggle('on',DK().sync);
-  $('#dkHint').textContent=deck.status||(deck.buf?'Tap or drag the waveform to seek. SPEED works like a turntable (pitch moves with it). MATCH sets the rack tempo to the track. SYNC ▶ starts the track with the rack.'
+  $('#dkHint').textContent=deck.status||(deck.info&&deck.info.low?'This file is low bitrate, so it will sound dull and swishy no matter what. Try a 192–320 kbps or lossless copy. ':'')+(deck.info&&deck.info.mono?'Mono file: VOCALS can\'t separate (that stem works by finding sound panned dead-centre in stereo). ':'')+(deck.buf?'Tap or drag the waveform to seek. SPEED works like a turntable (pitch moves with it). MATCH sets the rack tempo to the track. SYNC ▶ starts the track with the rack.'
     :'Load an audio file you own (MP3, M4A, WAV…). It plays into MX-4 CH4, then through the WG-1 pad effects. Tracks aren\'t saved, so reload them each visit.');}
 const wv=$('#wave'),wg2=wv.getContext('2d');
 function sizeWave(){const r=devicePixelRatio||1;if(!wv.clientWidth)return;wv.width=wv.clientWidth*r;wv.height=wv.clientHeight*r;}
@@ -903,13 +957,13 @@ function drawWave(){if(!wv.width||!$('#deck').classList.contains('show'))return;
   wg2.clearRect(0,0,w,h);wg2.fillStyle='#151208';wg2.fillRect(0,0,w,h);
   if(!deck.buf){wg2.fillStyle='rgba(255,209,102,.6)';wg2.font=`700 ${11*r}px 'Chakra Petch',sans-serif`;wg2.textAlign='center';
     wg2.fillText(deck.status?'LOADING…':'TAP TO LOAD A TRACK',w/2,h/2+4*r);return;}
-  const pos=(deck.drag!=null?deck.drag:deckPos())/deck.buf.duration,n=deck.peaks.length,bw=w/n;
+  const pos=(deck.drag!=null?deck.drag:heardPos())/deck.buf.duration,n=deck.peaks.length,bw=w/n;
   for(let i=0;i<n;i++){const v=deck.peaks[i]*h*.42,x=i*bw;wg2.fillStyle=i/n<pos?'#ffd166':'rgba(255,209,102,.3)';wg2.fillRect(x,h/2-v,Math.max(bw-.5,1),v*2||1);}
   wg2.fillStyle='#fff';wg2.fillRect(pos*w-1*r,0,2*r,h);
   wg2.font=`700 ${10*r}px 'Chakra Petch',sans-serif`;wg2.fillStyle='rgba(255,240,200,.9)';wg2.textAlign='left';
   wg2.fillText(deck.name.slice(0,34),8*r,15*r);
   wg2.font=`${10*r}px 'JetBrains Mono',monospace`;wg2.textAlign='right';
-  wg2.fillText(tfmt(deckPos())+' / '+tfmt(deck.buf.duration),w-8*r,h-8*r);}
+  wg2.fillText(tfmt(heardPos())+' / '+tfmt(deck.buf.duration),w-8*r,h-8*r);}
 
 /* ---------- mixer UI ---------- */
 const stripSrc=[];

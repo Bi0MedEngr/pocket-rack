@@ -7,7 +7,7 @@ A pocket-sized music rack that runs entirely in the browser (Web Audio API) and 
 - **DRM-8 rhythm unit**: 8 synthesized drum voices (kick, snare, clap, closed/open hat, tom, rim, bell), 16-step sequencer, per-voice level/tune/decay, swing.
 - **VX-1 mono synth**: 2 oscillators + sub + noise, resonant lowpass filter with envelope, ADSR amp, LFO (pitch/filter/amp), 16-step sequencer with accent and slide, live keyboard.
 - **WG-1 wave gen + XY pad**: Kaoss-style touch pad. Synth programs (Lead, Theremin, Wobble) and FX programs (DJ Filter, Delay, Roll) that process whatever is patched into its FX input.
-- **PL-1 track deck**: load an audio file you own, with waveform seek, 3-band EQ with kills, turntable-style speed, loop, BPM detection / tap tempo, and sync to the rack transport.
+- **PL-1 track deck**: load an audio file you own, with waveform seek, 3-band EQ with kills, turntable-style speed, loop, BPM detection / tap tempo, and sync to the rack transport. Live **stems** (vocals / drums / bass / melody) via real-time spectral separation, plus a bitrate/quality readout.
 - **MX-4 mixer**: 4 channels with level, pan, delay send and mute, a tempo-synced send delay, master drive and volume.
 
 ## Flip the rack
