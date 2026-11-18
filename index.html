@@ -180,6 +180,7 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
 .sec h4 span{color:var(--deck);letter-spacing:.1em;margin-left:6px}
 .dkt{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
 .dkt .big{width:56px;height:40px;font-size:17px}
+#progs .chip{font-size:10px;letter-spacing:.03em;padding:0 2px}
 .foot{font-size:10px;color:var(--faint);text-align:center;margin-top:14px;line-height:1.5}
 </style>
 </head>
@@ -259,7 +260,7 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
   </div>
   <div class="sec"><h4>WAVE GENERATOR</h4><div class="row" id="wgk"></div></div>
   <div class="sec"><h4>PROGRAM</h4>
-    <div class="chips c3" id="progs"></div>
+    <div class="chips" id="progs"></div>
     <div class="padwrap"><canvas id="xy"></canvas></div>
     <div class="hint" id="padHint"></div>
   </div>
@@ -332,8 +333,17 @@ const PROGS=[
   {v:'wobble',t:'WOBBLE',k:'SYNTH',xl:'PITCH',yl:'WOB RATE'},
   {v:'filter',t:'DJ FILTER',k:'FX',xl:'LP ◂ ▸ HP',yl:'RESO'},
   {v:'delay',t:'DELAY',k:'FX',xl:'TIME',yl:'FEEDBACK'},
-  {v:'roll',t:'ROLL',k:'FX',xl:'SLICE',yl:'TONE'}];
+  {v:'roll',t:'ROLL',k:'FX',xl:'SLICE',yl:'TONE'},
+  {v:'reverb',t:'REVERB',k:'FX',xl:'TONE',yl:'MIX'},
+  {v:'flanger',t:'FLANGER',k:'FX',xl:'RATE',yl:'FEEDBACK'},
+  {v:'crush',t:'CRUSH',k:'FX',xl:'RATE REDUCE',yl:'BITS'},
+  {v:'gate',t:'GATE',k:'FX',xl:'DIVISION',yl:'DEPTH'},
+  {v:'ring',t:'RING MOD',k:'FX',xl:'CARRIER',yl:'MIX'},
+  {v:'brake',t:'BRAKE',k:'FX',xl:'STOP TIME',yl:'SPIN-UP'}];
 const isFx=p=>PROGS.find(x=>x.v===p).k==='FX';
+const GATEDIV=[{t:'1/4',b:1},{t:'1/8',b:.5},{t:'1/16',b:.25},{t:'1/32',b:.125},{t:'1/8T',b:1/3},{t:'1/16T',b:1/6}];
+const CRUSH_SRC="class Crush extends AudioWorkletProcessor{constructor(){super();this.f=1;this.b=16;this.p=[0,0];this.h=[0,0];this.port.onmessage=m=>{this.f=m.data.f;this.b=m.data.b;};}process(ins,outs){const i=ins[0],o=outs[0];if(!i||!i.length)return true;const lv=Math.pow(2,this.b-1);for(let c=0;c<o.length;c++){const x=i[c]||i[0],y=o[c];let p=this.p[c]||0,h=this.h[c]||0;for(let n=0;n<y.length;n++){p+=1;if(p>=this.f){p-=this.f;h=Math.round(x[n]*lv)/lv;}y[n]=h;}this.p[c]=p;this.h[c]=h;}return true;}}registerProcessor('pr-crush',Crush);";
+const PHINT={reverb:'Big wash over the whole mix. X = dark to bright, Y = amount. Lift your finger and the tail rings out.',flanger:'Sweeping jet-plane comb. X = sweep speed, Y = intensity.',crush:'Lo-fi destroyer. X = sample-rate reduction, Y = bit crushing.',gate:'Tempo-synced chopper. X = chop rate, Y = depth. Starts on the next 16th while the rack is playing.',ring:'Metallic robot tones. X = carrier pitch, Y = blend.',brake:'Hold to slow the mix to a stop like a tape machine (X at touch = stop time). Let go for the spin-up (Y at release = faster).'};
 
 /* ---------- jacks (back of rack) ---------- */
 const DEVS=[
@@ -428,7 +438,8 @@ function initAudio(){
 
   /* AUDIO OUT (hardware interface) */
   A.outIn=G(); A.analyser=ctx.createAnalyser(); A.analyser.fftSize=2048;
-  A.outIn.connect(A.analyser).connect(ctx.destination);
+  A.lim=ctx.createDynamicsCompressor();A.lim.threshold.value=-2;A.lim.knee.value=0;A.lim.ratio.value=20;A.lim.attack.value=.001;A.lim.release.value=.08;
+  A.outIn.connect(A.lim).connect(A.analyser).connect(ctx.destination);
 
   /* MX-4 mixer */
   const M=A.mx={sum:G(),ch:[]};
@@ -477,7 +488,25 @@ function initAudio(){
   W.fxIn.connect(W.dIn).connect(W.dl); W.dl.connect(W.dFb).connect(W.dl); W.dl.connect(W.dWet).connect(W.fxOut);
   W.rIn=G(0); W.rl=ctx.createDelay(2); W.rFb=G(0); W.rLp=filt('lowpass',12000); W.rWet=G(0);
   W.fxIn.connect(W.rIn).connect(W.rl); W.rl.connect(W.rFb).connect(W.rl); W.rl.connect(W.rLp).connect(W.rWet).connect(W.fxOut);
-  starts.push(W.o1,W.o2,W.lfo,W.xCV,W.yCV,W.gCV);
+  /* WG-1 extra FX: reverb, flanger, crusher, gate, ring mod, brake */
+  const irL=Math.floor(ctx.sampleRate*2.8),ir=ctx.createBuffer(2,irL,ctx.sampleRate);
+  for(let c=0;c<2;c++){const d=ir.getChannelData(c);let lp=0;const ramp=ctx.sampleRate*.012;
+    for(let i=0;i<irL;i++){const p=i/irL,e=Math.pow(1-p,3.2);lp+=((Math.random()*2-1)*e-lp)*(.25+.75*(1-p));d[i]=lp*(i<ramp?i/ramp:1);}}
+  W.rvIn=G(0);W.rvTone=filt('lowpass',6000,.5);W.rv=ctx.createConvolver();W.rv.buffer=ir;W.rvOut=G(0);
+  W.fxIn.connect(W.rvIn).connect(W.rvTone).connect(W.rv).connect(W.rvOut).connect(W.fxOut);
+  W.flIn=G(0);W.flD=ctx.createDelay(.05);W.flD.delayTime.value=.0065;W.flFb=G(.5);W.flOut=G(0);
+  W.flLfo=ctx.createOscillator();W.flLfoG=G(.0034);W.flLfo.frequency.value=.3;W.flLfo.connect(W.flLfoG).connect(W.flD.delayTime);
+  W.fxIn.connect(W.flIn).connect(W.flD);W.flD.connect(W.flFb).connect(W.flD);W.flD.connect(W.flOut).connect(W.fxOut);
+  W.crIn=G(0);W.crOut=G(0);W.crWs=ctx.createWaveShaper();W.crBits=-1;W.crIn.connect(W.crWs).connect(W.crOut).connect(W.fxOut);W.fxIn.connect(W.crIn);
+  try{if(ctx.audioWorklet&&window.AudioWorkletNode){const u=URL.createObjectURL(new Blob([CRUSH_SRC],{type:'application/javascript'}));
+    ctx.audioWorklet.addModule(u).then(()=>{const n=new AudioWorkletNode(ctx,'pr-crush',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2],channelCount:2,channelCountMode:'explicit'});
+      W.crIn.disconnect(W.crWs);W.crIn.connect(n);n.connect(W.crOut);W.cr=n;}).catch(()=>{});}}catch(e){}
+  W.gtIn=G(0);W.gt=G(1);W.gtOut=G(0);W.fxIn.connect(W.gtIn).connect(W.gt).connect(W.gtOut).connect(W.fxOut);
+  W.gtLp=filt('lowpass',600,.5);W.gtD=G(0);W.gtLp.connect(W.gtD).connect(W.gt.gain);W.gtOsc=null;
+  W.rmIn=G(0);W.rmG=G(0);W.rmOut=G(0);W.rmOsc=ctx.createOscillator();W.rmOsc.frequency.value=400;W.rmOsc.connect(W.rmG.gain);
+  W.fxIn.connect(W.rmIn).connect(W.rmG).connect(W.rmOut).connect(W.fxOut);
+  W.brIn=G(0);W.brD=ctx.createDelay(4);W.brOut=G(0);W.brT=1;W.brT0=0;W.fxIn.connect(W.brIn).connect(W.brD).connect(W.brOut).connect(W.fxOut);
+  starts.push(W.o1,W.o2,W.lfo,W.xCV,W.yCV,W.gCV,W.flLfo,W.rmOsc);
 
   /* PL-1 track deck */
   const D=A.pl={};D.low=ctx.createBiquadFilter();D.low.type='lowshelf';D.low.frequency.value=250;
@@ -765,7 +794,7 @@ PROGS.forEach(p=>{const b=document.createElement('button');b.className='chip';b.
 $('#holdBtn').onclick=()=>{PD().hold=!PD().hold;if(!PD().hold&&pad.on)padUp(true);refreshPad();save();};
 function refreshPad(){progEls.forEach((b,i)=>b.classList.toggle('sel',PROGS[i].v===PD().prog));$('#holdBtn').classList.toggle('on',PD().hold);
   const fx=isFx(PD().prog);
-  $('#padHint').textContent=fx?'FX programs process whatever is patched into the WG-1 FX IN jack (the whole mix by default). Touch to engage.'
+  $('#padHint').textContent=PHINT[PD().prog]?PHINT[PD().prog]:fx?'FX programs process whatever is patched into the WG-1 FX IN jack (the whole mix by default). Touch to engage.'
     :'Touch and drag to play. X = pitch (snapped to the scale), Y = '+(PD().prog==='wobble'?'wobble speed, synced to tempo':'filter cutoff')+'. HOLD latches it.';}
 
 function scaleNotes(){const P=PD(),sc=SCALES[P.scale],out=[];for(let o=0;o<P.range;o++)sc.forEach(s=>out.push(P.root+o*12+s));out.push(P.root+P.range*12);return out;}
@@ -778,7 +807,13 @@ function padReadout(){const P=PD(),x=pad.x,y=pad.y;
     case'wobble':return[nn(padPitch(x)),WOB[clamp(Math.floor(y*WOB.length),0,WOB.length-1)].t];
     case'filter':return[x<.48?'LP '+hz(80*Math.pow(250,x/.5)):x>.52?'HP '+hz(20*Math.pow(300,(x-.5)/.5)):'OPEN','Q '+(.7+y*17).toFixed(1)];
     case'delay':return[DIVS[dlyIdx(x)].t,pct(y*.92)];
-    case'roll':return[ROLL[clamp(Math.floor(x*ROLL.length),0,3)].t,hz(200*Math.pow(90,y))];}}
+    case'roll':return[ROLL[clamp(Math.floor(x*ROLL.length),0,3)].t,hz(200*Math.pow(90,y))];
+    case'reverb':return[hz(400*Math.pow(30,x)),pct(y)];
+    case'flanger':return[(.05*Math.pow(160,x)).toFixed(2)+'Hz',pct(y*.88)];
+    case'crush':return['÷'+Math.pow(48,x).toFixed(1),Math.round(16-y*14)+' bit'];
+    case'gate':return[GATEDIV[gIdx(x)].t,pct(y)];
+    case'ring':return[hz(20*Math.pow(150,x)),pct(y)];
+    case'brake':return[(.3+x*2.7).toFixed(1)+'s',Math.round(Math.max(.06,.7-y*.64)*1000)+'ms'];}}
 function padApply(t,first){const P=PD(),W=A.w,x=pad.x,y=pad.y,prog=P.prog;
   W.xCV.offset.setTargetAtTime(x,t,.01);W.yCV.offset.setTargetAtTime(y,t,.01);
   if(!isFx(prog)){const f=mtof(padPitch(x));
@@ -792,7 +827,8 @@ function padApply(t,first){const P=PD(),W=A.w,x=pad.x,y=pad.y,prog=P.prog;
     const q=.7+y*17;W.lp.Q.setTargetAtTime(q,t,.01);W.hp.Q.setTargetAtTime(q,t,.01);}
   else if(prog==='delay'){W.dl.delayTime.setTargetAtTime(DIVS[dlyIdx(x)].b*60/state.bpm,t,.03);W.dFb.gain.setTargetAtTime(y*.92,t,.02);}
   else if(prog==='roll'){W.rLp.frequency.setTargetAtTime(200*Math.pow(90,y),t,.02);
-    const i=clamp(Math.floor(x*ROLL.length),0,3);if(i!==pad.rollDiv){pad.rollDiv=i;rollCapture(t,ROLL[i].b*60/state.bpm);}}}
+    const i=clamp(Math.floor(x*ROLL.length),0,3);if(i!==pad.rollDiv){pad.rollDiv=i;rollCapture(t,ROLL[i].b*60/state.bpm);}}
+  else fxApply(t,prog,x,y);}
 function rollCapture(t,len){const W=A.w,ps=[W.rIn.gain,W.rFb.gain,W.rWet.gain,W.dry.gain];ps.forEach(p=>p.cancelScheduledValues(t));
   W.rl.delayTime.cancelScheduledValues(t);W.rl.delayTime.setValueAtTime(len,t);
   W.rIn.gain.setValueAtTime(1,t);W.rFb.gain.setValueAtTime(0,t);W.rWet.gain.setValueAtTime(0,t);W.dry.gain.setValueAtTime(1,t);
@@ -802,6 +838,7 @@ function padDown(){initAudio();const t=ctx.currentTime+.003,P=PD(),W=A.w;pad.on=
   if(!isFx(P.prog)){padApply(t,true);const g=W.vca.gain;hold(g,t);g.linearRampToValueAtTime(.7,t+Math.max(P.atk,.003));return;}
   if(P.prog==='filter'){W.dry.gain.setTargetAtTime(0,t,.008);W.fWet.gain.setTargetAtTime(1,t,.008);}
   if(P.prog==='delay'){W.dIn.gain.setTargetAtTime(1,t,.005);}
+  engageFx(t,P.prog);
   padApply(t,true);}
 function padUp(force){if(!pad.on)return;if(PD().hold&&!force)return;pad.on=false;if(!ctx)return;
   const t=ctx.currentTime+.003,P=PD(),W=A.w;
@@ -809,8 +846,45 @@ function padUp(force){if(!pad.on)return;if(PD().hold&&!force)return;pad.on=false
   const g=W.vca.gain;hold(g,t);g.setTargetAtTime(0,t,Math.max(P.rel/3,.003));
   W.fWet.gain.setTargetAtTime(0,t,.01);W.dIn.gain.setTargetAtTime(0,t,.01);
   [W.rIn.gain,W.rFb.gain,W.rWet.gain,W.dry.gain].forEach(p=>p.cancelScheduledValues(t));
-  W.rIn.gain.setTargetAtTime(0,t,.005);W.rFb.gain.setTargetAtTime(0,t,.005);W.rWet.gain.setTargetAtTime(0,t,.005);W.dry.gain.setTargetAtTime(1,t,.008);
+  W.rIn.gain.setTargetAtTime(0,t,.005);W.rFb.gain.setTargetAtTime(0,t,.005);W.rWet.gain.setTargetAtTime(0,t,.005);if(P.prog==='brake')brakeEnd(t);else W.dry.gain.setTargetAtTime(1,t,.008);
+  fxRelease(t);
   pad.rollDiv=-1;}
+
+/* ---- extra pad FX ---- */
+const gIdx=x=>clamp(Math.floor(x*GATEDIV.length),0,GATEDIV.length-1);
+function engageFx(t,prog){const W=A.w,S=(p,v,tc=.01)=>p.setTargetAtTime(v,t,tc);
+  if(prog==='reverb')S(W.rvIn.gain,1);
+  else if(prog==='flanger'){S(W.flIn.gain,1);S(W.flOut.gain,.75);}
+  else if(prog==='crush'){S(W.dry.gain,0,.006);S(W.crIn.gain,1);S(W.crOut.gain,1);}
+  else if(prog==='ring'){S(W.rmIn.gain,1);}
+  else if(prog==='gate'){const o=ctx.createOscillator();o.type='square';o.frequency.value=state.bpm/60/GATEDIV[gIdx(pad.x)].b;o.connect(W.gtLp);
+    const t0=(playing&&gridT>t)?gridT:t;o.start(t0);W.gtOsc=o;
+    [W.gtIn.gain,W.gtOut.gain,W.dry.gain].forEach(p=>p.cancelScheduledValues(t));
+    W.gtIn.gain.setTargetAtTime(1,t0,.004);W.gtOut.gain.setTargetAtTime(1,t0,.004);W.dry.gain.setTargetAtTime(0,t0,.004);}
+  else if(prog==='brake')brakeStart(t);}
+function fxRelease(t){const W=A.w,Z=(g,tc=.01)=>{g.cancelScheduledValues(t);g.setTargetAtTime(0,t,tc);};
+  Z(W.rvIn.gain);Z(W.rvOut.gain,.45);Z(W.flIn.gain);Z(W.flOut.gain);Z(W.crIn.gain);Z(W.crOut.gain);Z(W.gtIn.gain,.004);Z(W.gtOut.gain,.004);Z(W.rmIn.gain);Z(W.rmOut.gain);
+  if(W.gtOsc){try{W.gtOsc.stop(t+.03);}catch(e){}W.gtOsc=null;}}
+function fxApply(t,prog,x,y){const W=A.w;
+  if(prog==='reverb'){W.rvTone.frequency.setTargetAtTime(400*Math.pow(30,x),t,.02);W.rvOut.gain.setTargetAtTime(y*1.8,t,.02);}
+  else if(prog==='flanger'){W.flLfo.frequency.setTargetAtTime(.05*Math.pow(160,x),t,.03);W.flFb.gain.setTargetAtTime(y*.88,t,.02);}
+  else if(prog==='crush'){crushSet(x,y);}
+  else if(prog==='gate'){if(W.gtOsc)W.gtOsc.frequency.setTargetAtTime(state.bpm/60/GATEDIV[gIdx(x)].b,t,.005);
+    W.gt.gain.setTargetAtTime(1-y/2,t,.01);W.gtD.gain.setTargetAtTime(y/2,t,.01);}
+  else if(prog==='ring'){W.rmOsc.frequency.setTargetAtTime(20*Math.pow(150,x),t,.02);W.rmOut.gain.setTargetAtTime(y*1.5,t,.01);W.dry.gain.setTargetAtTime(1-y,t,.01);}}
+function crushSet(x,y){const W=A.w,f=Math.pow(48,x),b=Math.round(16-y*14);
+  if(W.cr)W.cr.port.postMessage({f,b});
+  else if(b!==W.crBits){W.crBits=b;const n=4096,lv=Math.pow(2,b-1),c=new Float32Array(n);for(let i=0;i<n;i++){const v=i/(n-1)*2-1;c[i]=Math.round(v*lv)/lv;}W.crWs.curve=c;}}
+function brakeStart(t){const W=A.w,T=.3+pad.x*2.7;W.brT=T;W.brT0=t;
+  [W.dry.gain,W.brIn.gain,W.brOut.gain,W.brD.delayTime].forEach(p=>p.cancelScheduledValues(t));
+  W.dry.gain.setValueAtTime(0,t);W.brIn.gain.setValueAtTime(1,t);W.brOut.gain.setValueAtTime(1,t);
+  const dl=W.brD.delayTime;dl.setValueAtTime(0,t);const n=24;for(let i=1;i<=n;i++){const tau=T*i/n;dl.linearRampToValueAtTime(tau*tau/(2*T),t+tau);}
+  W.brOut.gain.setValueAtTime(1,t+T*.8);W.brOut.gain.linearRampToValueAtTime(0,t+T);}
+function brakeEnd(t){const W=A.w,e=Math.max(0,t-W.brT0),T=W.brT||1,d=e<T?e*e/(2*T):T/2,R=Math.max(.06,.7-pad.y*.64,d/3);
+  const dl=W.brD.delayTime;dl.cancelScheduledValues(t);dl.setValueAtTime(d,t);dl.linearRampToValueAtTime(0,t+R);
+  const bo=W.brOut.gain;bo.cancelScheduledValues(t);bo.setValueAtTime(e<T*.8?1:Math.max(0,(T-e)/(T*.2)),t);bo.linearRampToValueAtTime(1,t+Math.min(R,.06));bo.setValueAtTime(1,t+R);bo.setTargetAtTime(0,t+R+.03,.005);
+  const dg=W.dry.gain;dg.cancelScheduledValues(t);dg.setValueAtTime(0,t);dg.setValueAtTime(1,t+R);
+  W.brIn.gain.cancelScheduledValues(t);W.brIn.gain.setValueAtTime(1,t);W.brIn.gain.setValueAtTime(0,t+R+.03);}
 
 const xy=$('#xy'),xg=xy.getContext('2d');
 function sizeXY(){const r=devicePixelRatio||1;if(!xy.clientWidth)return;xy.width=xy.clientWidth*r;xy.height=xy.clientHeight*r;}
