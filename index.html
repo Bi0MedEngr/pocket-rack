@@ -191,6 +191,10 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
 .seg .opts{overflow:visible}.seg button:first-child{border-radius:4px 0 0 4px}.seg button:last-child{border-radius:0 4px 4px 0}
 .seg button.on{position:relative;z-index:1;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.5),0 0 10px 1px var(--kc)}
 .step.sel{box-shadow:inset 0 0 0 2px var(--synth),0 0 12px 1px var(--synth),0 2px 0 #000}
+.aiinfo{font:600 10px/1.4 'JetBrains Mono',monospace;color:#8fe9c4;letter-spacing:.04em;margin:-2px 0 8px;min-height:0}.aiinfo:empty{display:none}
+#stAI.run{animation:aip 1.4s ease-in-out infinite}#stAI.on,#stAI.run{border-color:#5df0b0;color:#5df0b0;box-shadow:0 0 0 1px #5df0b0,0 0 12px rgba(93,240,176,.55)}#stAI.err{border-color:#ff6b6b;color:#ff6b6b}
+@keyframes aip{50%{box-shadow:0 0 0 1px #5df0b0,0 0 4px rgba(93,240,176,.2)}}
+.stems.aiOn .stem:not(.off){box-shadow:0 0 0 1px #5df0b0,0 0 14px rgba(93,240,176,.45);border-radius:10px}
 .foot{font-size:10px;color:var(--faint);text-align:center;margin-top:14px;line-height:1.5}
 </style>
 </head>
@@ -292,7 +296,7 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
   </div>
   <div class="sec"><h4>TONE</h4><div class="row" id="dkk"></div></div>
   <div class="sec"><h4>STEMS<span id="stInfo"></span></h4>
-    <div class="btns" style="flex-wrap:wrap;margin-bottom:8px"><button class="sbtn" id="stOn">STEMS OFF</button><button class="sbtn" id="stAca">ACAPELLA</button><button class="sbtn" id="stIns">INSTRUMENTAL</button><button class="sbtn" id="stAll">ALL</button></div>
+    <div class="btns" style="flex-wrap:wrap;margin-bottom:8px"><button class="sbtn" id="stOn">STEMS OFF</button><button class="sbtn" id="stAca">ACAPELLA</button><button class="sbtn" id="stIns">INSTRUMENTAL</button><button class="sbtn" id="stAll">ALL</button><button class="sbtn" id="stAI" title="Run Meta HTDemucs AI separation in this browser, progressively while you play">AI STEMS</button></div><div id="aiInfo" class="aiinfo"></div>
     <div class="stems" id="stems"></div>
   </div>
   <div class="sec"><h4>TEMPO</h4><div class="row" id="dkb"></div>
@@ -1003,9 +1007,11 @@ function initStems(){const D=A.pl;D.stemReady=false;
 function applyStems(){if(!ctx||!A.pl)return;const D=A.pl,st=DK().stems,on=!!(st.on&&D.stemReady);
   if(on!==D.stemOn){const was=deck.playing,hp=heardPos();if(was){deckStopSrc();deck.playing=false;}
     try{D.in.disconnect();}catch(e){}try{D.stem&&D.stem.disconnect();}catch(e){}
-    if(on){D.in.connect(D.stem);D.stem.connect(D.low);}else D.in.connect(D.low);
+    if(!D.dspG){D.dspG=ctx.createGain();D.dspG.connect(D.low);}
+    if(on){D.in.connect(D.stem);D.stem.connect(D.dspG);}else D.in.connect(D.low);
     D.stemOn=on;deck.offset=hp;if(was)deckPlay();}
-  if(D.stemSet){const g=k=>st.mute[k]?0:st[k];D.stemSet({v:g('v'),d:g('d'),b:g('b'),o:g('o')});}}
+  if(D.stemSet){const g=k=>st.mute[k]?0:st[k];D.stemSet({v:g('v'),d:g('d'),b:g('b'),o:g('o')});}
+  aiGains();}
 const STEMS=[{k:'v',t:'VOCALS'},{k:'d',t:'DRUMS'},{k:'b',t:'BASS'},{k:'o',t:'MELODY'}];
 const stemEls={};
 STEMS.forEach(({k,t})=>{const c=document.createElement('div');c.className='stem';$('#stems').appendChild(c);
@@ -1025,7 +1031,7 @@ function refreshDeck(){const st=DK().stems,D=ctx&&A.pl;
   $('#dkInfo').innerHTML=deck.info?deck.info.html:'';
   $('#stOn').textContent=st.on?'STEMS ON':'STEMS OFF';$('#stOn').classList.toggle('on',st.on);
   STEMS.forEach(({k})=>{stemEls[k].m.classList.toggle('on',st.mute[k]);stemEls[k].c.classList.toggle('off',!st.on||st.mute[k]);});
-  $('#stInfo').textContent=D&&D.stemErr?'· UNAVAILABLE IN THIS BROWSER':st.on?(D&&D.stemReady?`· LIVE · ${Math.round(D.stemLat*1000)}ms`:'· STARTING…'):'';
+  $('#stInfo').textContent=D&&D.stemErr?'· UNAVAILABLE IN THIS BROWSER':st.on?(D&&D.stemReady?(ai.cov?'· AI STEMS':`· LIVE · ${Math.round(D.stemLat*1000)}ms`):'· STARTING…'):'';
   $('#dkPlay').textContent=deck.playing?'❚❚':'▶';$('#dkPlay').classList.toggle('on',deck.playing);
   $('#dkLoop').classList.toggle('on',DK().loop);$('#dkSync').classList.toggle('on',DK().sync);
   $('#dkHint').textContent=deck.status||(deck.info&&deck.info.low?'This file is low bitrate, so it will sound dull and swishy no matter what. Try a 192–320 kbps or lossless copy. ':'')+(deck.info&&deck.info.mono?'Mono file: VOCALS can\'t separate (that stem works by finding sound panned dead-centre in stereo). ':'')+(deck.buf?'Tap or drag the waveform to seek. SPEED works like a turntable (pitch moves with it). MATCH sets the rack tempo to the track. SYNC ▶ starts the track with the rack.'
@@ -1043,11 +1049,68 @@ function drawWave(){if(!wv.width||!$('#deck').classList.contains('show'))return;
     wg2.fillText(deck.status?'LOADING…':'TAP TO LOAD A TRACK',w/2,h/2+4*r);return;}
   const pos=(deck.drag!=null?deck.drag:heardPos())/deck.buf.duration,n=deck.peaks.length,bw=w/n;
   for(let i=0;i<n;i++){const v=deck.peaks[i]*h*.42,x=i*bw;wg2.fillStyle=i/n<pos?'#ffd166':'rgba(255,209,102,.3)';wg2.fillRect(x,h/2-v,Math.max(bw-.5,1),v*2||1);}
+  if(ai.N&&ai.buf===deck.buf){wg2.fillStyle='#5df0b0';ai.ready.forEach(q=>{const x=q[0]/ai.N*w;wg2.fillRect(x,h-3*r,Math.max((q[1]-q[0])/ai.N*w,1),3*r);});}
   wg2.fillStyle='#fff';wg2.fillRect(pos*w-1*r,0,2*r,h);
   wg2.font=`700 ${10*r}px 'Chakra Petch',sans-serif`;wg2.fillStyle='rgba(255,240,200,.9)';wg2.textAlign='left';
   wg2.fillText(deck.name.slice(0,34),8*r,15*r);
   wg2.font=`${10*r}px 'JetBrains Mono',monospace`;wg2.textAlign='right';
   wg2.fillText(tfmt(heardPos())+' / '+tfmt(deck.buf.duration),w-8*r,h-8*r);}
+
+
+/* ---------- AI stems (HTDemucs in the browser, progressive) ---------- */
+const AI_WORKLET="class PRAI extends AudioWorkletProcessor{constructor(){super();this.ch=[];this.g=[1,1,1,1];this.pl=false;this.t0=0;this.p0=0;this.rate=1;this.c=null;"+
+"this.port.onmessage=e=>{const m=e.data;if(m.chunk){this.ch.push(m.chunk);}else if(m.clear){this.ch=[];this.c=null;}else if(m.g){this.g=m.g;}else if(m.sync){"+
+"const pred=this.p0+(m.t0-this.t0)*this.rate*44100;if(!(this.pl&&m.play&&m.rate===this.rate&&Math.abs(pred-m.p0)<200)){this.t0=m.t0;this.p0=m.p0;this.rate=m.rate;}this.pl=m.play;}};}"+
+"find(i){const c=this.c;if(c&&i>=c.start&&i<c.end)return c;for(const x of this.ch)if(i>=x.start&&i<x.end){this.c=x;return x;}return null;}"+
+"process(_,outs){const o=outs[0],L=o[0],R=o[1];if(!this.pl)return true;const step=this.rate*44100/sampleRate;let p=this.p0+(currentTime-this.t0)*this.rate*44100;const g=this.g;"+
+"for(let n=0;n<L.length;n++,p+=step){const i=Math.floor(p),c=this.find(i);if(!c)continue;const f=p-i,k=i-c.start,k1=Math.min(k+1,c.end-c.start-1);let l=0,r=0;"+
+"for(let s=0;s<4;s++){const gs=g[s];if(!gs)continue;const a=c.d[s*2],b=c.d[s*2+1];l+=gs*(a[k]+(a[k1]-a[k])*f);r+=gs*(b[k]+(b[k1]-b[k])*f);}L[n]=l/32768;R[n]=r/32768;}return true;}}"+
+"registerProcessor('pr-ai',PRAI);";
+const ai={st:'off',run:0,node:null,g:null,ready:[],buf:null,N:0,cov:false,rtf:0,ep:'',msg:'',pct:0,timer:0,lastCov:false};
+function aiAddReady(s,e){ai.ready.push([s,e]);ai.ready.sort((a,b)=>a[0]-b[0]);const m=[];for(const q of ai.ready){const l=m[m.length-1];if(l&&q[0]<=l[1]+1)l[1]=Math.max(l[1],q[1]);else m.push(q.slice());}ai.ready=m;}
+function aiGains(){if(!ai.node)return;const st=DK().stems,g=k=>st.mute[k]?0:st[k];ai.node.port.postMessage({g:[g('d'),g('b'),g('o'),g('v')]});}
+async function aiInit(){initAudio();const url=URL.createObjectURL(new Blob([AI_WORKLET],{type:'application/javascript'}));await ctx.audioWorklet.addModule(url);
+  ai.node=new AudioWorkletNode(ctx,'pr-ai',{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[2]});ai.g=ctx.createGain();ai.g.gain.value=0;ai.node.connect(ai.g);ai.g.connect(A.pl.low);
+  ai.timer=setInterval(aiTick,50);aiGains();}
+function aiReset(){ai.run++;ai.ready=[];ai.buf=null;ai.N=0;ai.cov=false;ai.st='off';ai.msg='';ai.pct=0;if(ai.node)ai.node.port.postMessage({clear:1,});aiUI();refreshDeck();}
+function aiTick(){if(!ctx||!A.pl||!ai.node)return;
+  if(ai.buf&&ai.buf!==deck.buf){aiReset();return;}
+  const st=DK().stems,on=!!(st.on&&A.pl.stemReady&&ai.ready.length&&ai.buf===deck.buf),hp=heardPos()*44100,rate=deck.rate||1;
+  const cov=on&&ai.ready.some(q=>hp>=q[0]&&hp+.12*44100*rate<=q[1]);
+  const t=ctx.currentTime;ai.g.gain.setTargetAtTime(cov?1:0,t,.012);if(A.pl.dspG)A.pl.dspG.gain.setTargetAtTime(cov?0:1,t,.012);
+  ai.node.port.postMessage({sync:1,t0:t,p0:hp,rate,play:!!(deck.playing&&on)});
+  if(cov!==ai.cov){ai.cov=cov;$('#stems').classList.toggle('aiOn',cov);refreshDeck();}}
+function aiUI(){const b=$('#stAI');if(!b)return;
+  b.textContent=ai.st==='run'?'AI '+ai.pct+'%':ai.st==='done'?'AI READY':ai.st==='load'?'AI…':ai.st==='err'?'AI ERROR':'AI STEMS';
+  b.classList.toggle('run',ai.st==='run'||ai.st==='load');b.classList.toggle('on',ai.st==='done');b.classList.toggle('err',ai.st==='err');
+  $('#aiInfo').textContent=ai.msg;}
+async function to44(buf){const n=Math.ceil(buf.duration*44100),oc=new OfflineAudioContext(2,n,44100),s=oc.createBufferSource();s.buffer=buf;s.connect(oc.destination);s.start();
+  const r=await oc.startRendering();return [r.getChannelData(0),r.getChannelData(1)];}
+async function aiStart(){
+  if(ai.st==='run'||ai.st==='load'){aiReset();return;}
+  if(!deck.buf){ai.msg='Load a track first.';aiUI();return;}
+  if(!ctx||!ctx.audioWorklet){ai.st='err';ai.msg='This browser has no AudioWorklet, so AI stems can\'t run.';aiUI();return;}
+  if(location.protocol==='file:'){ai.st='err';ai.msg='AI stems need the hosted version (GitHub Pages), not a local file.';aiUI();return;}
+  const my=++ai.run,live=()=>my===ai.run;ai.st='load';ai.ready=[];ai.cov=false;ai.rtf=0;ai.pct=0;
+  try{
+    if(!ai.node)await aiInit();
+    const buf=deck.buf;ai.buf=buf;ai.msg='LOADING ENGINE…';aiUI();
+    const mod=await import('./ai-stems.js');let sep;
+    if(/[?&]aimock/.test(location.search))sep=mod.makeMockSeparator(250);
+    else{const ort=await mod.loadOrt();if(!live())return;
+      const mb=await mod.fetchModel((f,c)=>{ai.msg=c?'LOADING CACHED MODEL…':'DOWNLOADING MODEL (172 MB, ONE TIME) '+Math.round(f*100)+'%';aiUI();});if(!live())return;
+      ai.msg='STARTING MODEL…';aiUI();sep=await mod.makeOnnxSeparator(ort,mb,ep=>{ai.ep=ep;});}
+    if(!live())return;
+    ai.msg='PREPARING AUDIO…';aiUI();const [l,r]=await to44(buf);if(!live())return;
+    ai.N=l.length;ai.st='run';ai.msg='SEPARATING…';aiUI();
+    await mod.runProgressive({left:l,right:r,sep,isCancelled:()=>!live(),playhead:()=>heardPos()*44100,
+      onChunk:c=>{if(!live())return;aiAddReady(c.start,c.end);ai.node.port.postMessage({chunk:{start:c.start,end:c.end,d:c.d}},c.d.map(a=>a.buffer));},
+      onSeg:q=>{if(!live())return;const rt=q.secs/(q.ms/1000);ai.rtf=ai.rtf?ai.rtf*.6+rt*.4:rt;ai.pct=Math.round(q.done/q.total*100);
+        ai.msg=ai.pct+'% · '+ai.rtf.toFixed(1)+'× REAL-TIME · '+(ai.ep||'').toUpperCase()+(ai.rtf<1?' · SLOWER THAN PLAYBACK, AI KICKS IN WHERE IT HAS CAUGHT UP':'');aiUI();}});
+    if(live()){ai.st='done';ai.msg='ALL STEMS READY · '+(ai.ep||'').toUpperCase();aiUI();}
+  }catch(e){if(live()){ai.st='err';ai.msg=('AI STEMS FAILED: '+((e&&e.message)||e)).slice(0,160)+' · live stems still work.';aiUI();}console.warn(e);}
+}
+$('#stAI').onclick=aiStart;
 
 /* ---------- mixer UI ---------- */
 const stripSrc=[];
@@ -1173,6 +1236,7 @@ function frame(){requestAnimationFrame(frame);
 
 $('#bpm').textContent=state.bpm;refreshDrums();refreshSeq();refreshPad();refreshDeck();refreshStrips();requestAnimationFrame(frame);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ctx&&ctx.state!=='running')ctx.resume();});
+window.__pr={get ctx(){return ctx;},A,ai,deck,heardPos};
 })();
 </script>
 <script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
